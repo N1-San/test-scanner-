@@ -61,7 +61,7 @@ class BarcodeScanner {
                 position: relative !important;
             }
             #${this.containerId} video {
-                z-index: auto !important; /* Remove extreme z-index so button stays above */
+                z-index: auto !important;
                 position: relative !important;
                 object-fit: cover !important;
                 width: 100% !important;
@@ -78,10 +78,26 @@ class BarcodeScanner {
                 pointer-events: none;
                 display: block !important;
             }
+
+            /* 🔥 Force Stop button above video */
+            #stop-scanner {
+                position: absolute !important;
+                bottom: 20px !important;
+                left: 50% !important;
+                transform: translateX(-50%) !important;
+                z-index: 99999 !important;
+                background: red;
+                color: white;
+                padding: 10px 20px;
+                border: none;
+                border-radius: 8px;
+                font-size: 16px;
+            }
         `;
         document.head.appendChild(style);
-        console.log("🎨 Injected scanner overlay styles");
+        console.log("🎨 Injected scanner overlay + stop button styles");
     }
+
 
     async startScan(onScan) {
         console.log("📡 Starting scan...");

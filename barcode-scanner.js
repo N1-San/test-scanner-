@@ -9,36 +9,71 @@ class BarcodeScanner {
 
         console.log("🚀 Initializing BarcodeScanner");
 
-        this.bindScannerButtons(); // Initial scan button binding
-        this.bindStopButton();     // Stop button in modal
+        this.bindScannerButtons();
+        this.bindStopButton();
+    }
+
+    isAndroid() {
+        return /Android/i.test(navigator.userAgent);
+    }
+
+    isFlutterWebView() {
+        return navigator.userAgent.includes("wv") || window.FlutterWebViewPlatform !== undefined;
     }
 
     showModal() {
-        if (this.modal) this.modal.style.display = "block";
+        if (this.modal) {
+            this.modal.style.display = "block";
+
+            // Fullscreen adjustments for Android & Flutter WebView
+            const ua = navigator.userAgent.toLowerCase();
+            if (ua.includes("android") || this.isFlutterWebView()) {
+                const content = this.modal.querySelector(".scanner-modal-content");
+                if (content) {
+                    content.style.width = "100%";
+                    content.style.height = "100%";
+                    content.style.maxWidth = "none";
+                    content.style.maxHeight = "none";
+                    content.style.borderRadius = "0";
+                    content.style.padding = "0";
+                }
+                const container = document.getElementById(this.containerId);
+                if (container) {
+                    container.style.width = "100%";
+                    container.style.height = (window.innerHeight - 60) + "px"; // leave space for stop button
+                }
+            }
+        }
     }
 
     hideModal() {
-        if (this.modal) this.modal.style.display = "none";
+        if (this.modal) {
+            this.modal.style.display = "none";
+        }
     }
 
     injectScannerStyles() {
         const style = document.createElement("style");
         style.innerHTML = `
-            #scanner-container {
-                height: 400px !important;
+            #${this.containerId} {
+                height: ${this.isAndroid() || this.isFlutterWebView() ? "100vh" : "400px"} !important;
+                width: 100% !important;
                 position: relative !important;
             }
-            #scanner-container video {
-                z-index: 100001 !important;
+            #${this.containerId} video {
+                z-index: auto !important; /* Remove extreme z-index so button stays above */
                 position: relative !important;
+                object-fit: cover !important;
+                width: 100% !important;
+                height: 100% !important;
             }
-            #scanner-container canvas {
-                z-index: 100002 !important;
+            #${this.containerId} canvas {
+                z-index: auto !important;
                 position: absolute !important;
             }
-            #scanner-container .qr-shaded-region,
-            #scanner-container #qr-shaded-region {
-                z-index: 100003 !important;
+            #${this.containerId} .qr-shaded-region,
+            #${this.containerId} #qr-shaded-region {
+                z-index: auto !important;
                 position: absolute !important;
                 pointer-events: none;
                 display: block !important;
@@ -48,31 +83,35 @@ class BarcodeScanner {
         console.log("🎨 Injected scanner overlay styles");
     }
 
-    isFlutterWebView() {
-        return navigator.userAgent.includes("wv") || window.FlutterWebViewPlatform !== undefined;
-    }
-
-    startScan(onScan) {
+    async startScan(onScan) {
         console.log("📡 Starting scan...");
         this.showModal();
-
-        const container = document.getElementById(this.containerId);
-        if (container) {
-            container.style.height = "400px";
-            container.style.position = "relative";
-        }
 
         if (!this.qrcodeScanner) {
             this.qrcodeScanner = new Html5Qrcode(this.containerId);
         }
 
-        if (this.isFlutterWebView()) {
-            console.log("📱 Detected Flutter WebView, forcing environment camera");
-            this.qrcodeScanner.start(
-                { facingMode: { exact: "environment" } },
+        try {
+            const devices = await Html5Qrcode.getCameras();
+            console.log("📷 Available devices:", devices);
+
+            let backCamera = devices.find(d =>
+                d.label.toLowerCase().includes("back") ||
+                d.label.toLowerCase().includes("rear")
+            );
+            const cameraId = backCamera ? backCamera.id : devices[0]?.id;
+
+            if (!cameraId) throw new Error("No camera found");
+
+            console.log(`🎯 Using camera: ${backCamera ? "Back" : "Default"}`, cameraId);
+
+            await this.qrcodeScanner.start(
+                { deviceId: { exact: cameraId } },
                 {
                     fps: 10,
-                    qrbox: { width: 300, height: 100 },
+                    qrbox: this.isAndroid() || this.isFlutterWebView()
+                        ? { width: window.innerWidth * 0.8, height: 150 }
+                        : { width: 300, height: 100 },
                     formatsToSupport: ["CODE_128", "EAN_13", "UPC_A"],
                 },
                 (decodedText) => {
@@ -83,15 +122,21 @@ class BarcodeScanner {
                 (errorMessage) => {
                     console.warn("⚠️ Scanning error:", errorMessage);
                 }
-            ).then(() => {
-                this.injectScannerStyles();
-            }).catch((err) => {
-                console.error("❌ Environment camera failed, falling back to default:", err);
-                this.qrcodeScanner.start(
+            );
+
+            this.injectScannerStyles();
+
+        } catch (err) {
+            console.warn("⚠️ Device selection failed, falling back to facingMode", err);
+
+            try {
+                await this.qrcodeScanner.start(
                     { facingMode: "environment" },
                     {
                         fps: 10,
-                        qrbox: { width: 300, height: 100 },
+                        qrbox: this.isAndroid() || this.isFlutterWebView()
+                            ? { width: window.innerWidth * 0.8, height: 150 }
+                            : { width: 300, height: 100 },
                         formatsToSupport: ["CODE_128", "EAN_13", "UPC_A"],
                     },
                     (decodedText) => {
@@ -102,63 +147,12 @@ class BarcodeScanner {
                     (errorMessage) => {
                         console.warn("⚠️ Scanning error:", errorMessage);
                     }
-                ).then(() => {
-                    this.injectScannerStyles();
-                }).catch((err) => {
-                    console.error("❌ Camera start failed completely:", err);
-                    this.hideModal();
-                });
-            });
-
-        } else {
-            Html5Qrcode.getCameras()
-                .then((devices) => {
-                    if (!devices || devices.length === 0) {
-                        console.warn("⚠️ No camera devices found");
-                        return;
-                    }
-
-                    let backCamera = devices.find(device =>
-                        device.label.toLowerCase().includes('back') ||
-                        device.label.toLowerCase().includes('rear')
-                    );
-                    const cameraId = backCamera ? backCamera.id : devices[0].id;
-
-                    this.qrcodeScanner
-                        .start(
-                            { deviceId: { exact: cameraId } },
-                            {
-                                fps: 10,
-                                qrbox: { width: 300, height: 100 },
-                                formatsToSupport: ["CODE_128", "EAN_13", "UPC_A"],
-                            },
-                            (decodedText) => {
-                                console.log("✅ Scanned code:", decodedText);
-                                onScan(decodedText);
-                                this.stop();
-                            },
-                            (errorMessage) => {
-                                console.warn("⚠️ Scanning error:", errorMessage);
-                            },
-                            300
-                        )
-                        .then(() => {
-                            this.injectScannerStyles();
-                            setTimeout(() => {
-                                const shaded = document.getElementById("qr-shaded-region");
-                                console.log("📦 qr-shaded-region element:", shaded);
-                                console.log("📦 display style:", shaded?.style?.display);
-                            }, 1000);
-                        })
-                        .catch((err) => {
-                            console.error("❌ Failed to start camera:", err);
-                            this.hideModal();
-                        });
-                })
-                .catch((err) => {
-                    console.error("❌ Camera detection failed:", err);
-                    this.hideModal();
-                });
+                );
+                this.injectScannerStyles();
+            } catch (finalErr) {
+                console.error("❌ Camera start failed completely:", finalErr);
+                this.hideModal();
+            }
         }
     }
 
